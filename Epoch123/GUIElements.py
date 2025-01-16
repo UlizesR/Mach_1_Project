@@ -1,49 +1,52 @@
 from PySide6.QtWidgets import QPushButton, QLineEdit, QSlider, QHBoxLayout, QLabel, QWidget, QSizePolicy, QComboBox
 from PySide6.QtCore import Qt, Signal
 
+
 class GuiWidget(QWidget):
-    """A horizontal layout with a label and a GUI element."""
-    def __init__(self, gui_elements = [], label_text=None, setFixedWidth=None):
+    """
+    A horizontal layout with a label and one or more GUI elements (e.g. input, combo, etc.).
+    """
+    def __init__(self, gui_elements=None, label_text=None, setFixedWidth=None):
         super().__init__()
         self.layout = QHBoxLayout()
         self.setLayout(self.layout)
+
         if label_text:
             self.label = QLabel(label_text)
             self.label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.label.setStyleSheet("color: white; font-size: 14px")
             self.layout.addWidget(self.label)
+
+        if gui_elements is None:
+            gui_elements = []
         for gui_element in gui_elements:
             self.layout.addWidget(gui_element)
+
         if setFixedWidth:
             self.setFixedWidth(setFixedWidth)
 
-        # Set size policies
-        if label_text:
-            self.label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        for gui_element in gui_elements:
-            gui_element.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
         # Adjust margins and spacing
-        self.layout.setContentsMargins(0, 0, 0, 0)  # 10px margins on all sides
-        self.layout.setSpacing(0)  # 10px space between widgets
-
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
 
 
 class Button(QPushButton):
-    """A custom QPushButton with a specific style and optional callback."""
+    """
+    A custom QPushButton with a specific style and optional callback.
+    """
     def __init__(self, text, callback=None, setFixedWidth=None, setFixedHeight=None):
         super().__init__(text)
         self.styles = """
             QPushButton {
-                background-color: #574B90; /* Green background */
-                color: white;             /* White text */
-                padding: 5px 10px;       /* Padding around the text */
-                text-align: center;       /* Center the text */
-                font-size: 14px;          /* Font size */
-                margin: 2px 2px;          /* Margin around the button */
+                background-color: #574B90;
+                color: white;
+                padding: 5px 10px;
+                text-align: center;
+                font-size: 14px;
+                margin: 2px 2px;
             }
             QPushButton:hover {
-                background-color: #786FA6; /* Darker green when hovered */
+                background-color: #786FA6;
             }
         """
         self.setStyleSheet(self.styles)
@@ -55,10 +58,12 @@ class Button(QPushButton):
         if callback:
             self.clicked.connect(callback)
 
+
 class LineEdit(QLineEdit):
-    """A custom QLineEdit with a specific style and optional fixed height and placeholder."""
-    # Define a custom signal that sends the text as a string
-    text_changed = Signal(str)
+    """
+    A custom QLineEdit with a specific style and optional fixed width and placeholder.
+    """
+    text_changed = Signal(str)  # Custom signal that emits the text
 
     def __init__(self, setFixedWidth=None, placeholder=None):
         super().__init__()
@@ -71,18 +76,20 @@ class LineEdit(QLineEdit):
             self.setFixedWidth(setFixedWidth)
         if placeholder:
             self.setPlaceholderText(placeholder)
-
-        # Connect the built-in textChanged signal to the custom signal
+        # Forward the built-in signal to our custom signal
         self.textChanged.connect(self.text_changed.emit)
 
+
 class Slider(QSlider):
-    """A custom QSlider with a specific style and optional fixed width."""
-    def __init__(self, orientation, min, max, interval, setFixedWidth=None):
+    """
+    A custom QSlider with a specific style and optional fixed width.
+    """
+    def __init__(self, orientation, min_val, max_val, interval, setFixedWidth=None):
         super().__init__(orientation)
         self.setStyleSheet("""
             QSlider::groove:horizontal {
                 border: 1px solid #999999;
-                height: 10px; /* the groove expands to the size of the slider by default. by giving it a height, it has a fixed size */
+                height: 10px;
                 background: #B0B0B0;
                 margin: 2px 0;
             }
@@ -91,13 +98,12 @@ class Slider(QSlider):
                 border: 1px solid #999999;
                 width: 18px;
                 height: 18px;
-                margin: -2px 0; /* handle is placed by default at the center of the groove. by giving it a negative margin, we move it to the left */
+                margin: -2px 0;
                 border-radius: 9px;
             }
         """)
-        
-        self.setMinimum(min)
-        self.setMaximum(max)
+        self.setMinimum(min_val)
+        self.setMaximum(max_val)
         self.setTickInterval(interval)
         self.setCursor(Qt.PointingHandCursor)
         if setFixedWidth:
@@ -105,7 +111,9 @@ class Slider(QSlider):
 
 
 class CustomComboBox(QComboBox):
-    """A custom QComboBox with specific styling."""
+    """
+    A custom QComboBox with specific styling.
+    """
     def __init__(self, items=None):
         super().__init__()
         self.setStyleSheet("""
@@ -127,12 +135,10 @@ class CustomComboBox(QComboBox):
                 border-bottom-right-radius: 3px;
             }
         """)
-        # Initialize items if provided
         if items:
             self.add_items(items)
 
     def add_items(self, items):
-        """Add items to the combo box."""
         self.addItems(items)
 
     def set_on_change(self, callback):

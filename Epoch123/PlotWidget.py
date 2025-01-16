@@ -8,8 +8,12 @@ import soundfile as sf
 import logging
 import os
 
-
 class PlotWidget(QWidget):
+    """
+    Displays the waveform of the current audio data using matplotlib.
+    Allows selection of a region with SpanSelector, which can be used
+    for playback, zoom, crop, etc.
+    """
     def __init__(self, audio_player=None, parent=None):
         super().__init__(parent)
         self.figure, self.ax = plt.subplots()
@@ -20,30 +24,28 @@ class PlotWidget(QWidget):
         self.selected_region = None
         self.span_selector = None
 
-        # Initialize data attributes
         self.data = None
         self.fs = None
         self.audio = None
 
-        # Initialize undo and redo stacks
+        # Undo/redo stacks
         self.undo_stack = []
         self.redo_stack = []
-        self.data_stack = []
 
-        if audio_player:
-            self.audio_player = audio_player
+        self.audio_player = audio_player
+        if self.audio_player:
             self.audio_player.update_position.connect(self.update_position_line)
             self.audio_player.playback_finished.connect(self.reset_position_line)
 
-        # Set up the canvas layout
         layout = QVBoxLayout(self)
         layout.addWidget(self.canvas)
         self.setLayout(layout)
+
         self.setup_plot()
         self.connect_events()
 
     def setup_plot(self):
-        """Initial configuration for the plot appearance."""
+        """Initial configuration for the plot's appearance."""
         self.figure.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)
         self.ax.set_facecolor('black')
         self.figure.patch.set_facecolor('black')
@@ -56,39 +58,42 @@ class PlotWidget(QWidget):
         self.position_line = self.ax.axvline(0, color='gray', lw=1, zorder=3)
 
     def connect_events(self):
-        """Connect plot events for interaction."""
+        """Connect canvas events for clicking and selection."""
         self.canvas.mpl_connect('button_press_event', self.on_click)
         self.reset_span_selector()
 
     def reset_span_selector(self):
-        """Reset the SpanSelector to enable new selections."""
+        """Reset the span selector to allow new region selection."""
         if self.span_selector:
             self.span_selector.disconnect_events()
-        self.span_selector = SpanSelector(self.ax, self.on_select, 'horizontal', useblit=True, props=dict(alpha=0.3, facecolor='pink'))
-
+        self.span_selector = SpanSelector(
+            self.ax, self.on_select, 'horizontal',
+            useblit=True, props=dict(alpha=0.3, facecolor='pink')
+        )
 
     def set_ticks(self, duration, data_length, xmin=None, xmax=None):
-        """Dynamically set the ticks based on the current zoom level or total data length."""
+        """
+        Dynamically set the ticks based on the current zoom level or total data length.
+        """
         if xmin is not None and xmax is not None:
-            xticks = np.linspace(xmin, xmax, 10)  # Create 10 ticks within the zoomed range
+            xticks = np.linspace(xmin, xmax, 10)
             time_labels = np.char.mod('%.2f', np.linspace(xmin / self.fs, xmax / self.fs, 10))
         else:
             xticks = np.linspace(0, data_length, 10)
             time_labels = np.char.mod('%.2f', np.linspace(0, duration, 10))
 
-        time_labels[0] = ''  # Avoid overlapping the y-axis
+        time_labels[0] = ''
         self.ax.set_xticks(xticks)
         self.ax.set_xticklabels(time_labels, color='orange', fontsize=8, ha='left', va='bottom', y=0.03)
 
-        # get
         yticks = np.linspace(-1.6, 1.6, 15)
         self.ax.set_yticks(yticks)
         amplitude_labels = np.char.mod('%.1f', yticks)
-        amplitude_labels[0], amplitude_labels[-1] = '', ''  # Avoid overlap
+        amplitude_labels[0], amplitude_labels[-1] = '', ''
         self.ax.set_yticklabels(amplitude_labels, color='orange', fontsize=8, ha='left', va='top', x=0.02)
 
     def update_plot(self, data, fs, audio):
-        """Update the plot with new audio data."""
+        """Update the plot with new data."""
         self.audio = audio
         self.data = data
         self.fs = fs
@@ -97,96 +102,91 @@ class PlotWidget(QWidget):
         if self.line is None:
             self.line, = self.ax.plot(x_data, data, color='purple', lw=0.5)
         else:
-            self.line.set_data(x_data, data)
+            self.line.set_xdata(x_data)
+            self.line.set_ydata(data)
 
         self.position_line.set_xdata([0])
         self.ax.set_xlim(0, len(data))
-        self.set_ticks(audio.duration_seconds, len(data))
+
+        duration = audio.duration_seconds if audio else len(data) / fs if fs else 0
+        self.set_ticks(duration, len(data))
         self.canvas.draw_idle()
         self.reset_span_selector()
 
     def on_click(self, event):
-        """Handle plot selection clicks."""
-        if event.button == 1 and self.selected_region and event.inaxes == self.ax:
-            xmin, xmax = self.selected_region
-            if not (xmin <= event.xdata <= xmax):
-                self.clear_selection()
-            
-    def get_selected_segment(self):
-        if self.selected_region:
-            xmin, xmax = self.selected_region
-            return self.data[int(xmin):int(xmax)], xmin, xmax
-        return None, None, None
-
-    def update_position_line(self, position):
-        """Update the position line based on the current position in milliseconds."""
-        if self.fs and self.data is not None:
-            position_index = int(position / 1000 * self.fs)  # Convert milliseconds to index
-            if position_index <= len(self.data):
-                self.position_line.set_xdata([position_index, position_index])
-                self.canvas.draw_idle()
-
-    def reset_position_line(self):
-        """Reset the position line to the initial position of the selected region, or to zero."""
-        initial_position = int(self.selected_region[0]) if self.selected_region else 0
-        self.position_line.set_xdata([initial_position, initial_position])
-        self.canvas.draw_idle()
-
-    def on_select(self, xmin, xmax):
-        """Handle the selection of a region using SpanSelector."""
-        if xmax - xmin > 1:
-            self.selected_region = (xmin, xmax)
-            if self.selection_rect:
-                self.selection_rect.remove()
-            self.selection_rect = self.ax.axvspan(xmin, xmax, color='pink', alpha=0.3)
-
-            # Extract only the selected region from data
-            start_frame = int(xmin)
-            end_frame = int(xmax)
-            selected_segment = self.data[start_frame:end_frame]
-
-            # Pass the selected region's audio data to the audio player
-            self.audio_player.set_audio_data(selected_segment, self.fs)
-            self.audio_player.set_initial_frame(start_frame)
-            self.position_line.set_xdata([xmin])
-        else:
-            self.clear_selection()
-        self.canvas.draw_idle()
-
-    def clear_selection(self):
-        """Clear the selection rectangle and reset the audio player."""
-        if self.selection_rect:
-            self.selection_rect.remove()
-        self.selection_rect = None
-        self.selected_region = None
-        self.audio_player.set_audio_data(self.data, self.fs)  # Reset audio data to full length
-        self.position_line.set_xdata([0])
-        self.canvas.draw_idle()
-
-    def on_click(self, event):
-        """Clear selection if clicked outside the current selected region."""
-        if event.button == 1:  # Left click
+        """
+        Clear selection if left-click outside the selected region,
+        or open context menu on right-click.
+        """
+        if event.button == 1:
             if self.selected_region and event.inaxes == self.ax:
                 xmin, xmax = self.selected_region
                 if not (xmin <= event.xdata <= xmax):
                     self.clear_selection()
-        elif event.button == 3:  # Right click
+        elif event.button == 3:
             if self.selected_region:
                 xmin, xmax = self.selected_region
                 if xmin <= event.xdata <= xmax:
                     self.context_menu(event, 'selected_region')
                 else:
                     self.context_menu(event)
+            else:
+                self.context_menu(event)
+
+    def on_select(self, xmin, xmax):
+        """Handle selection of a region with the SpanSelector."""
+        if xmax - xmin > 1:
+            self.selected_region = (xmin, xmax)
+            if self.selection_rect:
+                self.selection_rect.remove()
+            self.selection_rect = self.ax.axvspan(xmin, xmax, color='pink', alpha=0.3)
+
+            start_frame = int(xmin)
+            end_frame = int(xmax)
+            selected_segment = self.data[start_frame:end_frame]
+
+            if self.audio_player:
+                self.audio_player.set_audio_data(selected_segment, self.fs)
+                self.audio_player.set_initial_frame(start_frame)
+            self.position_line.set_xdata([xmin])
+        else:
+            self.clear_selection()
+        self.canvas.draw_idle()
+
+    def clear_selection(self):
+        """Clear the selection rectangle and reset the audio player to full data."""
+        if self.selection_rect:
+            self.selection_rect.remove()
+        self.selection_rect = None
+        self.selected_region = None
+        if self.audio_player:
+            self.audio_player.set_audio_data(self.data, self.fs)
+        self.position_line.set_xdata([0])
+        self.canvas.draw_idle()
+
+    def update_position_line(self, position):
+        """Update the position line based on playback time in ms."""
+        if self.fs and self.data is not None:
+            position_index = int(position / 1000 * self.fs)
+            if position_index <= len(self.data):
+                self.position_line.set_xdata([position_index])
+                self.canvas.draw_idle()
+
+    def reset_position_line(self):
+        """Reset the position line to the start of the selection or 0."""
+        initial_position = int(self.selected_region[0]) if self.selected_region else 0
+        self.position_line.set_xdata([initial_position])
+        self.canvas.draw_idle()
 
     def contextMenuEvent(self, event):
-        """Override the context menu event to display the menu only when right-clicking on the widget."""
+        """Override Qt context menu event to show our own menu."""
         if self.selected_region:
             self.context_menu(event, 'selected_region')
         else:
             self.context_menu(event)
 
     def context_menu(self, event, context=None):
-        """Display a context menu with various audio processing options."""
+        """Create and launch a right-click context menu."""
         menu = QMenu()
 
         if context == 'selected_region':
@@ -225,92 +225,92 @@ class PlotWidget(QWidget):
 
         global_point = self.mapToGlobal(event.pos())
         menu.exec_(global_point)
-
-        # Reset the SpanSelector after closing the context menu
         self.reset_span_selector()
 
     def zoom_out(self):
+        """Zoom out to show the entire data range."""
         if self.data is not None:
             self.ax.set_xlim(0, len(self.data))
             self.canvas.draw_idle()
-            # Add the current state to the undo stack
             self.undo_stack.append(self.data)
             self.redo_stack.append(self.data)
-            self.set_ticks(self.audio.duration_seconds, len(self.data))
-            # Reset the selected region
+            duration = len(self.data) / self.fs if self.fs else 0
+            self.set_ticks(duration, len(self.data))
             self.clear_selection()
 
     def zoom_into_selected(self):
-        """Zoom into the currently selected region and adjust ticks accordingly."""
+        """Zoom into the selected region in the plot."""
         if self.selected_region:
             xmin, xmax = self.selected_region
-            self.undo_stack.append((np.copy(self.data), (self.ax.get_xlim())))  # Save current data and view limits
+            self.undo_stack.append((np.copy(self.data), self.ax.get_xlim()))
             self.ax.set_xlim(xmin, xmax)
-            self.set_ticks(None, None, xmin, xmax)  # Update ticks for the zoomed region
+            self.set_ticks(None, None, xmin, xmax)
             self.clear_selection()
             self.canvas.draw_idle()
 
     def crop_selected(self):
-        """Crop the audio data to only include the selected region."""
+        """Crop the audio data so that only the selected region remains."""
         if self.selected_region:
             xmin, xmax = self.selected_region
-            self.undo_stack.append((np.copy(self.data), (self.ax.get_xlim())))  # Save current data and view limits
+            self.undo_stack.append((np.copy(self.data), self.ax.get_xlim()))
             self.data = self.data[int(xmin):int(xmax)]
             self.clear_selection()
             self.update_plot(self.data, self.fs, self.audio)
 
     def crop_unselected(self):
-        """Crop the audio data to exclude the selected region."""
+        """Crop the audio data so that only the unselected region remains."""
         if self.selected_region:
             xmin, xmax = self.selected_region
-            self.undo_stack.append((np.copy(self.data), (self.ax.get_xlim())))  # Save current data and view limits
+            self.undo_stack.append((np.copy(self.data), self.ax.get_xlim()))
             self.data = np.concatenate((self.data[:int(xmin)], self.data[int(xmax):]))
             self.clear_selection()
             self.update_plot(self.data, self.fs, self.audio)
 
     def push_state(self, data):
-        # Save a copy of the data and current view limits
+        """Push current data + view limits onto undo stack."""
         current_view = self.ax.get_xlim()
         self.undo_stack.append((np.copy(data), current_view))
-        self.redo_stack.clear()  # Clear the redo stack whenever new changes are made
+        self.redo_stack.clear()
 
     def undo_last_action(self):
+        """Undo the last action by popping from the undo stack and pushing current to redo stack."""
         if self.undo_stack:
             try:
                 last_state, last_view = self.undo_stack.pop()
-                self.redo_stack.append((np.copy(self.data), self.ax.get_xlim()))  # Save current state before undo
+                self.redo_stack.append((np.copy(self.data), self.ax.get_xlim()))
                 self.data = last_state
-                self.ax.set_xlim(last_view)  # Restore view limits
+                self.ax.set_xlim(last_view)
                 self.update_plot(self.data, self.fs, self.audio)
                 self.canvas.draw_idle()
             except ValueError as e:
                 logging.error(f"Failed to unpack undo stack: {e}")
-                # Optionally, add more diagnostics
-                logging.error(f"Current undo stack state: {self.undo_stack}")
-        else:
-            logging.info("Undo stack is empty")
-
 
     def redo_last_action(self):
+        """Redo the last undone action by popping from the redo stack."""
         if self.redo_stack:
             next_state, next_view = self.redo_stack.pop()
-            self.undo_stack.append((np.copy(self.data), (self.ax.get_xlim())))  # Save current state before redo
+            self.undo_stack.append((np.copy(self.data), self.ax.get_xlim()))
             self.data = next_state
             self.update_plot(self.data, self.fs, self.audio)
-            # clear selection if any
             self.clear_selection()
-            self.ax.set_xlim(next_view)  # Restore view limits
+            self.ax.set_xlim(next_view)
             self.canvas.draw_idle()
 
     def save_plot(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Image", os.path.join(os.path.expanduser("~"), 'Downloads'), "Images (*.png)")
+        """Save the waveform plot to an image file."""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Image",
+            os.path.join(os.path.expanduser("~"), 'Downloads'),
+            "Images (*.png)"
+        )
         if file_path:
             self.figure.savefig(file_path, facecolor='black')
             logging.info(f"Plot saved to {file_path}")
 
     def reset_plot(self):
-        if self.data_stack:
-            self.data = np.copy(self.data_stack[0])
-            # clear selection if any
+        """Reset the plot to the original data (if stored in the stacks)."""
+        if self.undo_stack:
+            stored = self.undo_stack[0]
+            self.data, _ = stored if isinstance(stored, tuple) else (stored, None)
             self.clear_selection()
             self.update_plot(self.data, self.fs, self.audio)
